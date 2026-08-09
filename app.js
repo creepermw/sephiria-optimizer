@@ -218,6 +218,10 @@ function renderTabletList() {
       state.tablets[inp.dataset.id] = inp.checked;
       renderTabletList();
       updateCounts();
+      // 勾选后若无效果数据, 自动打开编辑器引导补全
+      if (inp.checked && !(state.customCells[inp.dataset.id] || byTabletId(inp.dataset.id).cells)) {
+        openTabletEditor(inp.dataset.id);
+      }
     });
   });
   wrap.querySelectorAll('.edit-btn').forEach(btn => {
