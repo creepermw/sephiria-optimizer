@@ -109,6 +109,16 @@ select { flex: 1; }
 .item-val { font-size: 11px; color: var(--dim); flex-shrink: 0; }
 .item-val.has-cell { color: #7ee08a; }
 .item-val.no-cell { color: #b0714f; }
+.edit-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.edit-btn:hover { border-color: var(--accent); }
 
 .r-common .rarity-badge, .r-common.rarity-badge { background: #4a4a55; color: var(--common); }
 .r-advanced .rarity-badge, .r-advanced.rarity-badge { background: #23406b; color: var(--advanced); }

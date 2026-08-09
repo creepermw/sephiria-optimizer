@@ -210,6 +210,7 @@ function renderTabletList() {
       <input type="checkbox" data-id="${t.id}" ${state.tablets[t.id] ? 'checked' : ''}>
       <span class="item-name" title="${esc(t.note || '')}">${esc(t.nameZh || t.name)}</span>
       <span class="item-val ${t.cells || state.customCells[t.id] ? 'has-cell' : 'no-cell'}">${t.cells || state.customCells[t.id] ? '有效果' : '待补'}</span>
+      <button class="edit-btn" data-id="${t.id}" title="自定义效果">✏️</button>
     </div>`).join('');
   wrap.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('click', e => e.stopPropagation());
@@ -217,6 +218,16 @@ function renderTabletList() {
       state.tablets[inp.dataset.id] = inp.checked;
       renderTabletList();
       updateCounts();
+    });
+  });
+  wrap.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      state.tablets[btn.dataset.id] = true;
+      const inp = wrap.querySelector(`input[data-id="${btn.dataset.id}"]`);
+      if (inp) inp.checked = true;
+      updateCounts();
+      openTabletEditor(btn.dataset.id);
     });
   });
 }
@@ -267,6 +278,14 @@ function runSolve() {
   const itemIds = Object.keys(state.owned).filter(k => state.owned[k]);
   const tabletIds = Object.keys(state.tablets).filter(k => state.tablets[k]);
   if (!itemIds.length) { alert('先勾选你背包里有的物品'); return; }
+  // 提示: 勾选了但无效果数据的石板不参与优化
+  const noEffect = tabletIds.filter(id => !(state.customCells[id] || byTabletId(id).cells));
+  if (noEffect.length) {
+    if (confirm(`以下石板还没有效果数据, 将不参与优化:\n${noEffect.map(id => byTabletId(id).nameZh).join('、')}\n\n要打开编辑器补全效果吗?`)) {
+      openTabletEditor(noEffect[0]);
+      return;
+    }
+  }
   state.solving = true;
   $('#solveBtn').disabled = true;
   $('#solveBtn').textContent = '求解中…';
@@ -393,8 +412,13 @@ function init() {
   });
   $('#tabletList').addEventListener('click', e => {
     const row = e.target.closest('.tablet-row');
-    if (row && e.target.tagName !== 'INPUT') {
+    if (row && e.target.tagName !== 'INPUT' && !e.target.closest('.edit-btn')) {
       const inp = row.querySelector('input');
+      // 打开编辑器 = 要用这个石板, 自动勾选
+      state.tablets[inp.dataset.id] = true;
+      inp.checked = true;
+      renderTabletList();
+      updateCounts();
       openTabletEditor(inp.dataset.id);
     }
   });
