@@ -205,13 +205,17 @@ function renderItemList() {
 
 function renderTabletList() {
   const wrap = $('#tabletList');
-  wrap.innerHTML = TABLETS.map(t => `
+  wrap.innerHTML = TABLETS.map(t => {
+    const has = t.cells || state.customCells[t.id];
+    const effText = state.customCells[t.id] ? '自定义' : (t.eff || '待补');
+    return `
     <div class="item-row tablet-row ${state.tablets[t.id] ? 'on' : ''}">
       <input type="checkbox" data-id="${t.id}" ${state.tablets[t.id] ? 'checked' : ''}>
       <span class="item-name" title="${esc(t.note || '')}">${esc(t.nameZh || t.name)}</span>
-      <span class="item-val ${t.cells || state.customCells[t.id] ? 'has-cell' : 'no-cell'}">${t.cells || state.customCells[t.id] ? '有效果' : '待补'}</span>
+      <span class="item-val ${has ? 'has-cell' : 'no-cell'}" title="${esc(effText)}">${esc(effText)}</span>
       <button class="edit-btn" data-id="${t.id}" title="自定义效果">✏️</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   wrap.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('click', e => e.stopPropagation());
     inp.addEventListener('change', () => {
@@ -239,6 +243,50 @@ function renderTabletList() {
 function updateCounts() {
   $('#itemCount').textContent = Object.keys(state.owned).filter(k => state.owned[k]).length;
   $('#tabletCount').textContent = Object.keys(state.tablets).filter(k => state.tablets[k]).length;
+}
+
+// ---------------- 详情面板 ---------------- //
+function showDetail(obj) {
+  const panel = $('#detailPanel');
+  if (!obj) { panel.innerHTML = '<p class="hint">点击左侧列表中的物品或石板, 这里会显示完整效果与数值。</p>'; return; }
+  if (obj.kind === 'item') {
+    const a = byId(obj.id);
+    const v = itemValue(a);
+    const tagNames = { atk: '攻击', spd: '攻速', crit: '暴击率', cdmg: '暴击伤害', elem: '元素', trig: '触发', surv: '生存', mp: '蓝量', eco: '经济', util: '功能' };
+    panel.innerHTML = `
+      <div class="detail-head r-${a.rarity}">
+        <span class="rarity-badge">${RARITY_LABEL[a.rarity]}</span>
+        <b>${esc(a.nameZh || a.name)}</b>
+        <span class="detail-val">价值 <b>${v}</b></span>
+      </div>
+      <div class="detail-tags">${a.tags.map(t => `<span class="tag">${tagNames[t] || t}</span>`).join('')}</div>
+      <div class="detail-effect">${esc(a.effect)}</div>
+      <div class="detail-meta">稀有度: ${RARITY_LABEL[a.rarity]} · 数据来源: ${a.src === 'wiki' ? 'Miraheze Wiki' : 'NGA社区'}</div>`;
+  } else {
+    const t = byTabletId(obj.id);
+    const cells = state.customCells[obj.id] || t.cells;
+    panel.innerHTML = `
+      <div class="detail-head">
+        <b>${esc(t.nameZh || t.name)}</b>
+        <span class="detail-val">${cells ? '有效果数据' : '无效果数据'}</span>
+      </div>
+      <div class="detail-effect">${esc(t.eff || '暂无效果数据, 可点击 ✏️ 自定义')}</div>
+      <div class="detail-cells">${cells ? cells.map(c => `<span class="cell-chip ${c.lv > 0 ? 'pos' : 'neg'}">${c.lv > 0 ? '+' : ''}${c.lv} @ (${c.dx},${c.dy})</span>`).join('') : '—'}</div>
+      <div class="detail-meta">${esc(t.note || '')}</div>`;
+  }
+}
+
+function bindDetail() {
+  $('#itemList').addEventListener('click', e => {
+    const row = e.target.closest('.item-row');
+    if (!row || e.target.tagName === 'INPUT') return;
+    showDetail({ kind: 'item', id: row.querySelector('input').dataset.id });
+  });
+  $('#tabletList').addEventListener('click', e => {
+    const row = e.target.closest('.tablet-row');
+    if (!row || e.target.tagName === 'INPUT' || e.target.closest('.edit-btn')) return;
+    showDetail({ kind: 'tablet', id: row.querySelector('input').dataset.id });
+  });
 }
 
 // ---------------- 渲染: 棋盘 ---------------- //
@@ -449,6 +497,7 @@ function init() {
     }
   });
   bindTabletEditorControls();
+  bindDetail();
 
   // 预设选择器填充
   $('#presetSelect').innerHTML = TABLET_PRESETS.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');

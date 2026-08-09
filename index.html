@@ -11,7 +11,7 @@
 <header>
   <h1>🐰 Sephiria 配装优化器</h1>
   <p class="sub">输入背包里有的神器/石板与背包大小, 自动求出收益最高的摆放方案。<br>
-  数据来源: sephiria.miraheze.org 与 NGA 玩家测算; <b>数值为估算</b>, 用于排序参考。</p>
+  数据来源: sephiria.miraheze.org / NGA 玩家测算 / konachangame 图鉴; <b>数值为估算或OCR识别</b>, 可在编辑器修正。</p>
 </header>
 
 <main class="layout">
@@ -40,7 +40,7 @@
     <div id="itemList" class="list"></div>
 
     <h2>③ 你拥有的石板 <span id="tabletCount" class="count">0</span></h2>
-    <p class="hint">勾选石板自动弹出效果编辑器(5×5~11×11, 数值可正可负)。</p>
+    <p class="hint">勾选石板自动弹出效果编辑器; 内置效果数据来自图鉴截图识别, 可✏️修正。</p>
     <div id="tabletList" class="list"></div>
     <div class="preset-row">
       <select id="presetSelect"></select>
@@ -60,6 +60,11 @@
     <div id="board" class="board"></div>
     <p class="hint">格子含义: 物品显示 <b>生效等级×价值</b>; 石板显示其指向的格子坐标。<br>
     等级 ≤0 的物品失效(灰色)。</p>
+
+    <h2>⑤ 物品详情 <span class="count">点击左侧物品/石板查看</span></h2>
+    <div id="detailPanel" class="detail-panel">
+      <p class="hint">点击左侧列表中的物品或石板, 这里会显示完整效果与数值。</p>
+    </div>
   </section>
 </main>
 
