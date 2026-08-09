@@ -3,7 +3,7 @@
 // 数据来源:
 //  A) sephiria.miraheze.org (46 个神器, infobox 结构化, 2024-2026)
 //  B) NGA 玩家数据测算帖 tid=44470360 (中文名/效果/稀有度)
-//  C) konachangame.com 简易图鉴 (石板名/稀有度)
+//  C) konachangame.com 图鉴截图 OCR 识别 (石板效果 2026-08)
 // 数值(value)为按效果文本的相对估算, 非官方公式, 供优化排序用。
 // 玩家可在 UI 中修改/添加物品, 并导出/导入 JSON 分享。
 // ============================================================
@@ -172,34 +172,88 @@ const ARTIFACTS = [
 // ---------- 石板 ----------
 // 石板效果: 对相对位置(以石板为原点)的格子内的神器 等级+N / -N。
 // cells: [{dx, dy, lv}]  dx=列偏移(右为正) dy=行偏移(下为正)
-// 旋转 = 对 cells 做 90° 旋转。effect 留空的石板需玩家在 UI 中自定义。
+// 旋转 = 对 cells 做 90° 旋转。
+// 数据来源: konachangame.com 图鉴截图 OCR 识别(2026-08), 方向/数值可能有误差,
+// 可在 UI 编辑器中修正; eff 为人类可读摘要。
 const TABLETS = [
-  { id: 't_justice', name: 'Justice', nameZh: '正义', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_simultaneity', name: 'Simultaneity', nameZh: '同时性', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_bonding', name: 'Bonding', nameZh: '接合', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_wave', name: 'Wave', nameZh: '波', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_acclaim', name: 'Acclaim', nameZh: '欢呼', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_fate', name: 'Fate', nameZh: '命运', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_approximation', name: 'Approximation', nameZh: '近似', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_tricorne', name: 'Tricorne', nameZh: '三头', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_advance', name: 'Advance', nameZh: '前进', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_elation', name: 'Elation', nameZh: '高扬', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_harmony', name: 'Harmony', nameZh: '和合', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_nurture', name: 'Nurture', nameZh: '养育', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_exploit', name: 'Exploit', nameZh: '榨取', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_cohesion', name: 'Cohesion', nameZh: '凝聚', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_binary', name: 'Binary Star', nameZh: '连星', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_favor', name: 'Favor', nameZh: '好意', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_preparation', name: 'Preparation', nameZh: '准备', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_wisdom', name: 'Wisdom', nameZh: '机知', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_handshake', name: 'Handshake', nameZh: '握手', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_hope', name: 'Hope', nameZh: '希望', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_dedication', name: 'Dedication', nameZh: '献呈', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_rebellion', name: 'Rebellion', nameZh: '反抗', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_future', name: 'Future', nameZh: '未来', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_mischief', name: 'Mischief', nameZh: '恶作剧', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_boundary', name: 'Boundary', nameZh: '境界', cells: null, note: '效果待补, 可自定义' },
-  { id: 't_oath', name: 'Oath', nameZh: '誓言', cells: null, note: '效果待补, 可自定义' },
+  { id: 't_justice', name: 'Justice', nameZh: '正义', cells: [
+      { dx: -1, dy: -2, lv: 1 }, { dx: -1, dy: -1, lv: 1 }, { dx: -1, dy: 0, lv: 1 }, { dx: -1, dy: 1, lv: 1 }, { dx: -1, dy: 2, lv: 1 },
+      { dx: 1, dy: -2, lv: 1 }, { dx: 1, dy: -1, lv: 1 }, { dx: 1, dy: 0, lv: 1 }, { dx: 1, dy: 1, lv: 1 }, { dx: 1, dy: 2, lv: 1 },
+    ], eff: '左、右两整列 +1', note: 'OCR识别' },
+  { id: 't_simultaneity', name: 'Simultaneity', nameZh: '同时性', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: 0, dy: 1, lv: 1 }, { dx: 0, dy: 2, lv: 1 },
+    ], eff: '垂直方向格子 +1', note: 'OCR识别' },
+  { id: 't_bonding', name: 'Bonding', nameZh: '接合', cells: [
+      { dx: 1, dy: 0, lv: 2 },
+    ], eff: '单格 +2', note: 'OCR识别' },
+  { id: 't_wave', name: 'Wave', nameZh: '波', cells: null, eff: '待补', note: '效果待补, 可自定义' },
+  { id: 't_acclaim', name: 'Acclaim', nameZh: '欢呼', cells: [
+      { dx: -1, dy: -1, lv: 1 }, { dx: 1, dy: -1, lv: 1 }, { dx: 0, dy: 1, lv: 1 },
+    ], eff: '三角排列 3 格 +1', note: 'OCR识别' },
+  { id: 't_fate', name: 'Fate', nameZh: '命运', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: -1, dy: 0, lv: 1 }, { dx: 1, dy: 0, lv: 1 }, { dx: 0, dy: 1, lv: 1 },
+    ], eff: '菱形 4 格 +1', note: 'OCR识别' },
+  { id: 't_approximation', name: 'Approximation', nameZh: '近似', cells: [
+      { dx: -1, dy: -1, lv: 1 }, { dx: 1, dy: -1, lv: 1 }, { dx: 0, dy: 1, lv: 1 },
+    ], eff: '三角排列 3 格 +1', note: 'OCR识别' },
+  { id: 't_tricorne', name: 'Tricorne', nameZh: '三头', cells: [
+      { dx: -1, dy: -1, lv: 1 }, { dx: 0, dy: -1, lv: 1 }, { dx: 1, dy: -1, lv: 1 },
+    ], eff: '上方一行 3 格 +1', note: 'OCR识别' },
+  { id: 't_advance', name: 'Advance', nameZh: '前进', cells: [
+      { dx: -1, dy: 0, lv: 1 }, { dx: 1, dy: 0, lv: 1 },
+    ], eff: '左、右 +1', note: 'OCR识别' },
+  { id: 't_elation', name: 'Elation', nameZh: '高扬', cells: [
+      { dx: -1, dy: 0, lv: 1 },
+    ], eff: '左格 +1', note: 'OCR识别' },
+  { id: 't_harmony', name: 'Harmony', nameZh: '和合', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: 1, dy: 0, lv: 1 }, { dx: -1, dy: 0, lv: -1 }, { dx: 0, dy: 1, lv: -1 },
+    ], eff: '上+1 右+1 左-1 下-1', note: 'OCR识别' },
+  { id: 't_nurture', name: 'Nurture', nameZh: '养育', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: -1, dy: 0, lv: 1 }, { dx: 0, dy: 1, lv: 1 }, { dx: 1, dy: 0, lv: -1 }, { dx: 1, dy: 1, lv: -1 },
+    ], eff: '上+1 左+1 下+1 右-1 右下-1', note: 'OCR识别' },
+  { id: 't_exploit', name: 'Exploit', nameZh: '榨取', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: 0, dy: 1, lv: -1 },
+    ], eff: '上+1 下-1', note: 'OCR识别' },
+  { id: 't_cohesion', name: 'Cohesion', nameZh: '凝聚', cells: [
+      { dx: 0, dy: -1, lv: 3 }, { dx: 0, dy: -2, lv: -1 }, { dx: 0, dy: 1, lv: -1 }, { dx: 0, dy: 2, lv: -1 },
+    ], eff: '上1格+3 同列其他-1', note: 'OCR识别' },
+  { id: 't_binary', name: 'Binary Star', nameZh: '连星', cells: [
+      { dx: -1, dy: 0, lv: 2 }, { dx: 1, dy: 0, lv: 2 },
+    ], eff: '左、右 +2', note: 'OCR识别' },
+  { id: 't_favor', name: 'Favor', nameZh: '好意', cells: [
+      { dx: 0, dy: 2, lv: 1 }, { dx: 0, dy: 1, lv: 1 },
+    ], eff: '下方格子 +1', note: 'OCR识别' },
+  { id: 't_preparation', name: 'Preparation', nameZh: '准备', cells: [
+      { dx: -1, dy: -1, lv: 1 }, { dx: 1, dy: 1, lv: 1 },
+    ], eff: '左上、右下 +1', note: 'OCR识别' },
+  { id: 't_wisdom', name: 'Wisdom', nameZh: '机知', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: 1, dy: 0, lv: 1 },
+    ], eff: '上、右 +1', note: 'OCR识别' },
+  { id: 't_handshake', name: 'Handshake', nameZh: '握手', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: 0, dy: 1, lv: 1 },
+    ], eff: '上、下 +1', note: 'OCR识别' },
+  { id: 't_hope', name: 'Hope', nameZh: '希望', cells: [
+      { dx: -1, dy: 0, lv: 1 }, { dx: 1, dy: 0, lv: 1 },
+    ], eff: '左、右 +1', note: 'OCR识别' },
+  { id: 't_dedication', name: 'Dedication', nameZh: '献呈', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: -1, dy: 0, lv: 1 }, { dx: 1, dy: 0, lv: 1 }, { dx: 0, dy: 1, lv: 1 },
+    ], eff: '上、下、左、右 +1', note: 'OCR识别' },
+  { id: 't_rebellion', name: 'Rebellion', nameZh: '反抗', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: 1, dy: -1, lv: 1 }, { dx: -1, dy: 1, lv: 1 },
+    ], eff: '上、右上、左下 +1', note: 'OCR识别' },
+  { id: 't_future', name: 'Future', nameZh: '未来', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: -1, dy: 0, lv: 1 }, { dx: -1, dy: 1, lv: 1 }, { dx: 1, dy: 1, lv: 1 },
+    ], eff: '上、左、左下、右下 +1', note: 'OCR识别' },
+  { id: 't_mischief', name: 'Mischief', nameZh: '恶作剧', cells: [
+      { dx: -1, dy: -1, lv: 1 }, { dx: 1, dy: -1, lv: -1 }, { dx: -1, dy: 0, lv: 1 }, { dx: -1, dy: 1, lv: 1 }, { dx: 1, dy: 1, lv: -1 },
+    ], eff: '左上+1 右上-1 左中+1 左下+1 右下-1', note: 'OCR识别' },
+  { id: 't_boundary', name: 'Boundary', nameZh: '境界', cells: [
+      { dx: 0, dy: -1, lv: 1 }, { dx: 0, dy: -2, lv: 1 }, { dx: 0, dy: -3, lv: 1 }, { dx: 0, dy: -4, lv: 1 }, { dx: 0, dy: -5, lv: 1 }, { dx: 0, dy: -6, lv: 1 },
+      { dx: 0, dy: 1, lv: 1 }, { dx: 0, dy: 2, lv: 1 }, { dx: 0, dy: 3, lv: 1 }, { dx: 0, dy: 4, lv: 1 }, { dx: 0, dy: 5, lv: 1 }, { dx: 0, dy: 6, lv: 1 },
+    ], eff: '上、下整列 +1', note: 'OCR识别' },
+  { id: 't_oath', name: 'Oath', nameZh: '誓言', cells: [
+      { dx: 0, dy: -1, lv: 2 }, { dx: -1, dy: 0, lv: 1 }, { dx: 1, dy: 0, lv: 1 }, { dx: 0, dy: 1, lv: 1 },
+    ], eff: '上格+2 左、右、下 +1', note: 'OCR识别' },
 ];
 
 // 示例石板(根据 namu.wiki 机制描述的通用模板, 数值为占位示例, 可在 UI 中修改)
