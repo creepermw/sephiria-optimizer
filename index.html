@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sephiria 配装优化器</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐰</text></svg>">
+</head>
+<body>
+<header>
+  <h1>🐰 Sephiria 配装优化器</h1>
+  <p class="sub">输入背包里有的神器/石板与背包大小, 自动求出收益最高的摆放方案。<br>
+  数据来源: sephiria.miraheze.org 与 NGA 玩家测算; <b>数值为估算</b>, 用于排序参考。</p>
+</header>
+
+<main class="layout">
+  <!-- 左: 输入 -->
+  <section class="panel">
+    <h2>① 背包设置</h2>
+    <div class="grid-row">
+      <label>宽 <input type="number" id="gridW" value="6" min="3" max="12"></label>
+      <label>高 <input type="number" id="gridH" value="4" min="2" max="10"></label>
+    </div>
+    <label>流派
+      <select id="buildSelect"></select>
+    </label>
+
+    <h2>② 你拥有的神器 <span id="itemCount" class="count">0</span></h2>
+    <div class="filters">
+      <input type="search" id="search" placeholder="搜索名称…">
+      <select id="rarityFilter">
+        <option value="all">全部稀有度</option>
+        <option value="common">白</option>
+        <option value="advanced">蓝</option>
+        <option value="rare">金</option>
+        <option value="legendary">红</option>
+      </select>
+    </div>
+    <div id="itemList" class="list"></div>
+
+    <h2>③ 你拥有的石板 <span id="tabletCount" class="count">0</span></h2>
+    <p class="hint">点击石板可自定义其效果(方向/等级)。无效果数据的石板不参与优化。</p>
+    <div id="tabletList" class="list"></div>
+    <div class="preset-row">
+      <select id="presetSelect"></select>
+      <button id="loadPresetBtn" title="把示例效果应用到某个石板">套用示例</button>
+    </div>
+  </section>
+
+  <!-- 中: 结果 -->
+  <section class="panel result-panel">
+    <h2>④ 最优摆放</h2>
+    <div class="actions">
+      <button id="solveBtn" class="primary">求解最优摆放</button>
+      <button id="shareBtn">复制分享链接</button>
+      <button id="clearBtn">清空</button>
+    </div>
+    <div id="resultMeta" class="result-meta"></div>
+    <div id="board" class="board"></div>
+    <p class="hint">格子含义: 物品显示 <b>生效等级×价值</b>; 石板显示其指向的格子坐标(旋转可调)。<br>
+    等级 ≤0 的物品失效(灰色)。</p>
+  </section>
+</main>
+
+<footer>
+  <p>独立玩家工具 · 非官方 · 数据为社区整理估算 · <a href="https://sephiria.miraheze.org/" target="_blank">Sephiria Wiki</a></p>
+</footer>
+
+<!-- 石板自定义编辑器 -->
+<div id="tabletEditor" class="modal" style="display:none">
+  <div class="modal-box">
+    <h3 id="tabletEditorTitle"></h3>
+    <p class="hint">点击格子设置 +1(再点一次设为 -1, 第三次取消)。中心格是石板自身位置。</p>
+    <div id="tabletEditorGrid" class="te-grid"></div>
+    <div class="actions">
+      <button id="tabletEditorClear">清空效果</button>
+      <button id="tabletEditorClose" class="primary">完成</button>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script>
+  if (typeof module === 'undefined') {
+    window.SEPHIRIA_DATA = { ARTIFACTS, TABLETS, TABLET_PRESETS, BUILD_PRESETS, RARITY_LABEL };
+  }
+</script>
+<script src="app.js"></script>
+</body>
+</html>
