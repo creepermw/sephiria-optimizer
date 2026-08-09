@@ -354,9 +354,12 @@ function openTabletEditor(id) {
   const t = byTabletId(id);
   const cells = state.customCells[id] || t.cells || [];
   const grid = $('#tabletEditorGrid');
+  const radius = Math.max(1, Math.min(5, +(grid.dataset.radius || 2)));
+  const n = radius * 2 + 1;
+  grid.style.gridTemplateColumns = `repeat(${n}, 44px)`;
   grid.innerHTML = '';
-  for (let r = -2; r <= 2; r++) {
-    for (let c = -2; c <= 2; c++) {
+  for (let r = -radius; r <= radius; r++) {
+    for (let c = -radius; c <= radius; c++) {
       const cell = cells.find(cl => cl.dx === c && cl.dy === r);
       const isOrigin = r === 0 && c === 0;
       const el = document.createElement('div');
@@ -364,17 +367,19 @@ function openTabletEditor(id) {
       el.textContent = cell ? (cell.lv > 0 ? '+' + cell.lv : String(cell.lv)) : (isOrigin ? '板' : '');
       el.addEventListener('click', () => {
         if (isOrigin) return;
+        const v = +($('#teValue')?.value || 1);
         const i = cells.findIndex(cl => cl.dx === c && cl.dy === r);
-        if (i >= 0) {
-          const lv = cells[i].lv;
-          if (lv > 0) cells[i].lv = -1;   // +1 -> -1
-          else if (lv < 0) cells.splice(i, 1); // -1 -> 删除
-        } else {
-          cells.push({ dx: c, dy: r, lv: 1 }); // 空 -> +1
+        if (i >= 0 && cells[i].lv === v) {
+          cells.splice(i, 1); // 同值再点 -> 删除
+        } else if (i >= 0) {
+          cells[i].lv = v;    // 已有 -> 改成当前数值
+        } else if (v !== 0) {
+          cells.push({ dx: c, dy: r, lv: v });
         }
         state.customCells[id] = cells.length ? cells.slice() : null;
         openTabletEditor(id); renderTabletList();
       });
+      grid.appendChild(el);
     }
   }
   $('#tabletEditorTitle').textContent = `自定义石板: ${t.nameZh || t.name}`;
@@ -382,6 +387,23 @@ function openTabletEditor(id) {
 }
 
 function closeTabletEditor() { $('#tabletEditor').style.display = 'none'; editingTablet = null; }
+
+function bindTabletEditorControls() {
+  const grid = $('#tabletEditorGrid');
+  $('#teRadius').addEventListener('change', e => {
+    grid.dataset.radius = e.target.value;
+    if (editingTablet) openTabletEditor(editingTablet);
+  });
+  $('#teValue').addEventListener('change', () => {
+    if (editingTablet) openTabletEditor(editingTablet);
+  });
+  $('#tabletEditorClose').addEventListener('click', closeTabletEditor);
+  $('#tabletEditorClear').addEventListener('click', () => {
+    if (!editingTablet) return;
+    state.customCells[editingTablet] = null;
+    openTabletEditor(editingTablet); renderTabletList();
+  });
+}
 
 // ---------------- 初始化 ---------------- //
 function init() {
@@ -426,12 +448,7 @@ function init() {
       openTabletEditor(inp.dataset.id);
     }
   });
-  $('#tabletEditorClose').addEventListener('click', closeTabletEditor);
-  $('#tabletEditorClear').addEventListener('click', () => {
-    if (!editingTablet) return;
-    state.customCells[editingTablet] = null;
-    openTabletEditor(editingTablet); renderTabletList();
-  });
+  bindTabletEditorControls();
 
   // 预设选择器填充
   $('#presetSelect').innerHTML = TABLET_PRESETS.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
