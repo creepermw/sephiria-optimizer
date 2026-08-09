@@ -1,42 +1,75 @@
 // ============================================================
 // Sephiria 配装优化器 · 核心逻辑 + UI
 // 优化模型(简化):
-//   - 背包为 W×H 网格, 物品(神器)与石板均占 1 格
+//   - 背包为 W×H 网格, 物品(神器)与石板均占 1 格, 部分格子可能被占用
 //   - 石板对指定相对位置的格子内的神器进行 等级+N/-N
-//   - 神器生效等级 = 1 + Σ(影响该格的石板等级), ≤0 失效(0 分)
-//   - 目标: 最大化 Σ(神器.value × 生效等级)
-// 算法: 两阶段 Beam Search (先石板布局, 再固定石板放物品)
+//   - 神器生效等级 = 1 + Σ石板影响, 截断到 [0, maxLevel]
+//   - 神器价值 = 基础价值 × 流派/武器权重 × 套装加成
+//   - 目标: 最大化 Σ(神器价值 × 生效等级)
+// 算法: 两阶段 Beam Search (先石板布局, 再固定石板放物品), 输出 Top3 方案
 // ============================================================
 
 (() => {
 'use strict';
 
 // ---------------- 数据 ---------------- //
-const { ARTIFACTS, TABLETS, TABLET_PRESETS, BUILD_PRESETS, RARITY_LABEL } =
+const { ARTIFACTS, TABLETS, TABLET_PRESETS, BUILD_PRESETS, RARITY_LABEL, SETS, SET_OF, WEAPONS, defaultMaxLevel } =
   typeof window !== 'undefined' ? window.SEPHIRIA_DATA : require('./data.js');
+
+const STORE_KEY = 'sephiria_optimizer_saves_v2';
 
 // ---------------- 状态 ---------------- //
 const state = {
   W: 6, H: 4,
   build: 'physical',
+  weapon: 'none',
   owned: {},        // itemId -> true
   tablets: {},      // tabletId -> true
   customCells: {},  // tabletId -> [{dx,dy,lv}] 用户自定义石板效果
+  occupied: {},     // "r,c" -> true  已占用格子
+  customItems: [],  // 玩家自录神器 {id,nameZh,rarity,tags,value,effect,maxLevel}
+  maxLevels: {},    // itemId -> maxLevel 覆盖
   solving: false,
+  results: [],      // Top3 方案 [{placements, score}]
+  resultIdx: 0,
 };
 
 // ---------------- 通用 ---------------- //
 const $ = sel => document.querySelector(sel);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const byId = id => ARTIFACTS.find(a => a.id === id);
+const TAG_NAMES = { atk: '攻击', spd: '攻速', crit: '暴击率', cdmg: '暴击伤害', elem: '元素', trig: '触发', surv: '生存', mp: '蓝量', eco: '经济', util: '功能' };
+const ALL_TAGS = Object.keys(TAG_NAMES);
+
+function byId(id) {
+  if (id.startsWith('c_')) return state.customItems.find(a => a.id === id);
+  return ARTIFACTS.find(a => a.id === id);
+}
 const byTabletId = id => TABLETS.find(t => t.id === id);
 
-// 流派权重 -> 物品价值
+// 勾选集合 (含自定义物品)
+function ownedIds() { return Object.keys(state.owned).filter(k => state.owned[k]); }
+
+// 套装加成: 基于勾选集合中同套装物品数量
+function setBonusOf(item) {
+  const sid = SET_OF[item.id];
+  if (!sid) return 1;
+  const count = ownedIds().filter(id => SET_OF[id] === sid).length;
+  return count >= 2 ? Math.min(1.6, 1 + (count - 1) * 0.15) : 1;
+}
+
+// 流派×武器权重 -> 物品价值
 function itemValue(item) {
-  const w = BUILD_PRESETS[state.build].tags;
+  const bw = BUILD_PRESETS[state.build].tags;
+  const ww = WEAPONS[state.weapon]?.tags || WEAPONS.none.tags;
   let sum = 0, n = 0;
-  for (const t of item.tags) { sum += (w[t] ?? 1); n++; }
-  return Math.round(item.value * sum / Math.max(1, n) * 10) / 10;
+  for (const t of item.tags) { sum += (bw[t] ?? 1) * (ww[t] ?? 1); n++; }
+  const base = Math.round(item.value * sum / Math.max(1, n) * 10) / 10;
+  return Math.round(base * setBonusOf(item) * 10) / 10;
+}
+
+function maxLevelOf(item) {
+  if (state.maxLevels[item.id] != null) return state.maxLevels[item.id];
+  return item.maxLevel || defaultMaxLevel(item.rarity);
 }
 
 // 石板旋转: cells 绕原点旋转 k×90°
@@ -45,7 +78,6 @@ function rotateCells(cells, k) {
   const r = k % 4;
   if (r === 0) return cells;
   return cells.map(({ dx, dy, lv }) => {
-    // 90° 顺时针: (x,y) -> (y,-x)
     let x = dx, y = dy;
     for (let i = 0; i < r; i++) { const t = x; x = y; y = -t; }
     return { dx: x, dy: y, lv };
@@ -58,12 +90,16 @@ function tabletCells(id, rot) {
   return c ? rotateCells(c, rot) : null;
 }
 
-// 一个完整方案: { items: [{id, r, c}], tablets: [{id, r, c, rot}], score }
 function emptyBoard() {
-  return Array.from({ length: state.H }, () => Array(state.W).fill(null));
+  const b = Array.from({ length: state.H }, () => Array(state.W).fill(null));
+  for (const key of Object.keys(state.occupied)) {
+    const [r, c] = key.split(',').map(Number);
+    if (r < state.H && c < state.W) b[r][c] = { kind: 'blocked' };
+  }
+  return b;
 }
 
-function effLevel(board, r, c) {
+function effLevel(board, r, c, item) {
   let lv = 1;
   for (const t of board.flat()) {
     if (!t || t.kind !== 'tablet') continue;
@@ -74,10 +110,10 @@ function effLevel(board, r, c) {
       if (cr === r && cc === c) lv += cell.lv;
     }
   }
+  if (item) lv = Math.min(lv, maxLevelOf(item));
   return Math.max(0, lv);
 }
 
-// 等级图: 每格等级 = 1 + Σ石板影响 (石板布局固定时不变)
 function levelMap(board) {
   const lm = Array.from({ length: state.H }, () => Array(state.W).fill(1));
   for (const row of board) for (const t of row) {
@@ -96,13 +132,13 @@ function scoreOf(placements, board) {
   let s = 0;
   for (const p of placements) {
     if (p.kind !== 'item') continue;
-    s += itemValue(byId(p.id)) * Math.max(0, lm[p.r][p.c]);
+    const item = byId(p.id);
+    s += itemValue(item) * Math.max(0, Math.min(lm[p.r][p.c], maxLevelOf(item)));
   }
   return s;
 }
 
-// beam search
-// 两阶段: 先探索石板布局(石板数量少), 再固定石板放置物品。
+// beam search: 两阶段, 返回 Top3 方案
 function solve(itemIds, tabletIds) {
   const W = state.W, H = state.H;
   const total = itemIds.length + tabletIds.length;
@@ -145,8 +181,8 @@ function solve(itemIds, tabletIds) {
     tBeam = next.slice(0, BEAM);
   }
 
-  // 阶段 2: 固定每种石板布局, 放置物品 (等级图不变, 增量计分)
-  let best = null;
+  // 阶段 2: 固定每种石板布局, 放置物品 (等级图不变, 增量计分), 收集每布局最优
+  const candidates = [];
   const tabletLayouts = tBeam.slice(0, Math.min(tBeam.length, 15));
   for (const t0 of tabletLayouts) {
     const lm = levelMap(t0.board);
@@ -158,13 +194,15 @@ function solve(itemIds, tabletIds) {
         for (let i = 0; i < iList.length; i++) {
           const id = iList[i];
           const rest = iList.slice(0, i).concat(iList.slice(i + 1));
-          const v = itemValue(byId(id));
+          const item = byId(id);
+          const v = itemValue(item);
+          const cap = maxLevelOf(item);
           for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
             if (board[r][c]) continue;
             const nb = board.map(row => row.slice());
             nb[r][c] = { kind: 'item', id, r, c };
             const pl = placements.concat([{ kind: 'item', id, r, c }]);
-            const nscore = score + v * Math.max(0, lm[r][c]);
+            const nscore = score + v * Math.max(0, Math.min(lm[r][c], cap));
             next.push({ board: nb, placements: pl, iList: rest, score: nscore });
           }
         }
@@ -173,32 +211,54 @@ function solve(itemIds, tabletIds) {
       next.sort((a, b) => b.score - a.score);
       beam = next.slice(0, BEAM);
     }
-    if (!best || beam[0].score > best.score) best = { board: beam[0].board, placements: beam[0].placements, score: beam[0].score };
+    if (beam.length) candidates.push({ board: beam[0].board, placements: beam[0].placements, score: beam[0].score });
   }
-  return best || { placements: [], board: emptyBoard(), score: 0 };
+
+  // 去重并按分数排序取 Top3
+  candidates.sort((a, b) => b.score - a.score);
+  const seen = new Set();
+  const top = [];
+  for (const cand of candidates) {
+    const sig = cand.placements.map(p => `${p.kind}:${p.id}:${p.r},${p.c}${p.rot != null ? ':' + p.rot : ''}`).sort().join('|');
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    top.push(cand);
+    if (top.length >= 3) break;
+  }
+  return top.length ? top : [{ placements: [], board: emptyBoard(), score: 0 }];
 }
 
 // ---------------- 渲染: 物品列表 ---------------- //
+function allItems() {
+  return ARTIFACTS.concat(state.customItems);
+}
+
 function renderItemList() {
   const q = ($('#search')?.value || '').toLowerCase();
   const rar = $('#rarityFilter')?.value || 'all';
   const wrap = $('#itemList');
-  const items = ARTIFACTS.filter(a =>
+  const items = allItems().filter(a =>
     (rar === 'all' || a.rarity === rar) &&
     (!q || a.name.toLowerCase().includes(q) || (a.nameZh || '').includes(q))
   );
-  wrap.innerHTML = items.map(a => `
+  wrap.innerHTML = items.map(a => {
+    const sid = SET_OF[a.id];
+    const setTag = sid ? `<span class="set-tag">${esc(SETS[sid].name)}</span>` : '';
+    return `
     <label class="item-row r-${a.rarity} ${state.owned[a.id] ? 'on' : ''}">
       <input type="checkbox" data-id="${a.id}" ${state.owned[a.id] ? 'checked' : ''}>
       <span class="rarity-badge">${RARITY_LABEL[a.rarity]}</span>
-      <span class="item-name" title="${esc(a.effect)}">${esc(a.nameZh || a.name)}</span>
+      <span class="item-name" title="${esc(a.effect)}">${esc(a.nameZh || a.name)}${a.id.startsWith('c_') ? ' ✎' : ''}</span>
+      ${setTag}
       <span class="item-val">${itemValue(a)}</span>
-    </label>`).join('') || '<div class="empty">没有匹配的物品</div>';
+    </label>`;
+  }).join('') || '<div class="empty">没有匹配的物品</div>';
   wrap.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('change', () => {
       state.owned[inp.dataset.id] = inp.checked;
       renderItemList();
       updateCounts();
+      scheduleSave();
     });
   });
 }
@@ -222,6 +282,7 @@ function renderTabletList() {
       state.tablets[inp.dataset.id] = inp.checked;
       renderTabletList();
       updateCounts();
+      scheduleSave();
       // 勾选后若无效果数据, 自动打开编辑器引导补全
       if (inp.checked && !(state.customCells[inp.dataset.id] || byTabletId(inp.dataset.id).cells)) {
         openTabletEditor(inp.dataset.id);
@@ -241,7 +302,7 @@ function renderTabletList() {
 }
 
 function updateCounts() {
-  $('#itemCount').textContent = Object.keys(state.owned).filter(k => state.owned[k]).length;
+  $('#itemCount').textContent = ownedIds().length;
   $('#tabletCount').textContent = Object.keys(state.tablets).filter(k => state.tablets[k]).length;
 }
 
@@ -252,16 +313,19 @@ function showDetail(obj) {
   if (obj.kind === 'item') {
     const a = byId(obj.id);
     const v = itemValue(a);
-    const tagNames = { atk: '攻击', spd: '攻速', crit: '暴击率', cdmg: '暴击伤害', elem: '元素', trig: '触发', surv: '生存', mp: '蓝量', eco: '经济', util: '功能' };
+    const sid = SET_OF[a.id];
+    const setText = sid ? ` · 套装: ${SETS[sid].name}` : '';
+    const setDetail = sid ? `<div class="detail-cells">${SETS[sid].ids.filter(id => state.owned[id] || byId(id)?.id === a.id).map(id => { const it = byId(id); return it ? `<span class="cell-chip pos">${esc(it.nameZh || it.name)}${state.owned[id] ? '' : ' (未勾)'}</span>` : ''; }).join('')}</div>` : '';
     panel.innerHTML = `
       <div class="detail-head r-${a.rarity}">
         <span class="rarity-badge">${RARITY_LABEL[a.rarity]}</span>
         <b>${esc(a.nameZh || a.name)}</b>
         <span class="detail-val">价值 <b>${v}</b></span>
       </div>
-      <div class="detail-tags">${a.tags.map(t => `<span class="tag">${tagNames[t] || t}</span>`).join('')}</div>
+      <div class="detail-tags">${a.tags.map(t => `<span class="tag">${TAG_NAMES[t] || t}</span>`).join('')}<span class="tag">上限Lv${maxLevelOf(a)}</span></div>
       <div class="detail-effect">${esc(a.effect)}</div>
-      <div class="detail-meta">稀有度: ${RARITY_LABEL[a.rarity]} · 数据来源: ${a.src === 'wiki' ? 'Miraheze Wiki' : 'NGA社区'}</div>`;
+      ${setText ? `<div class="detail-meta">套装: ${esc(SETS[sid].name)} (同套装≥2件, 每件价值+15%/件, 最多+60%)</div>${setDetail}` : ''}
+      <div class="detail-meta">稀有度: ${RARITY_LABEL[a.rarity]} · 数据来源: ${a.src === 'wiki' ? 'Miraheze Wiki' : (a.src === 'nga' ? 'NGA社区' : '玩家自定义')}</div>`;
   } else {
     const t = byTabletId(obj.id);
     const cells = state.customCells[obj.id] || t.cells;
@@ -292,7 +356,7 @@ function bindDetail() {
 // ---------------- 渲染: 棋盘 ---------------- //
 function renderBoard(placements, highlight) {
   const board = emptyBoard();
-  for (const p of placements || []) board[p.r][p.c] = p;
+  for (const p of placements || []) if (p.r != null && p.c != null) board[p.r][p.c] = p;
   const wrap = $('#board');
   wrap.style.gridTemplateColumns = `repeat(${state.W}, var(--cell))`;
   let html = '';
@@ -301,6 +365,10 @@ function renderBoard(placements, highlight) {
     for (let c = 0; c < state.W; c++) {
       const p = board[r][c];
       if (!p) { html += `<div class="cell empty"></div>`; continue; }
+      if (p.kind === 'blocked') {
+        html += `<div class="cell blocked" title="已占用格子 (求解时避开)">✕</div>`;
+        continue;
+      }
       if (p.kind === 'tablet') {
         const affected = cellsOf(p).map(cl => `${p.r + cl.dy},${p.c + cl.dx}`).filter(s => {
           const [rr, cc] = s.split(',').map(Number);
@@ -312,11 +380,12 @@ function renderBoard(placements, highlight) {
         </div>`;
       } else {
         const a = byId(p.id);
-        const lv = effLevel(board, r, c);
+        if (!a) continue;
+        const lv = effLevel(board, r, c, a);
         const off = lv <= 0;
         html += `<div class="cell item r-${a.rarity} ${off ? 'off' : ''} ${highlight && highlight.some(h => h[0] === r && h[1] === c) ? 'hl' : ''}" title="${esc(a.nameZh || a.name)}: ${esc(a.effect)}">
           <div class="i-name">${esc(a.nameZh || a.name)}</div>
-          <div class="i-lv">Lv.${lv} <b>${Math.round(itemValue(a) * lv)}</b></div>
+          <div class="i-lv">Lv.${lv}/${maxLevelOf(a)} <b>${Math.round(itemValue(a) * lv)}</b></div>
         </div>`;
       }
     }
@@ -327,10 +396,9 @@ function renderBoard(placements, highlight) {
 // ---------------- 求解流程 ---------------- //
 function runSolve() {
   if (state.solving) return;
-  const itemIds = Object.keys(state.owned).filter(k => state.owned[k]);
+  const itemIds = ownedIds();
   const tabletIds = Object.keys(state.tablets).filter(k => state.tablets[k]);
   if (!itemIds.length) { alert('先勾选你背包里有的物品'); return; }
-  // 提示: 勾选了但无效果数据的石板不参与优化
   const noEffect = tabletIds.filter(id => !(state.customCells[id] || byTabletId(id).cells));
   if (noEffect.length) {
     if (confirm(`以下石板还没有效果数据, 将不参与优化:\n${noEffect.map(id => byTabletId(id).nameZh).join('、')}\n\n要打开编辑器补全效果吗?`)) {
@@ -344,37 +412,173 @@ function runSolve() {
   $('#resultMeta').textContent = '';
   setTimeout(() => {
     const t0 = performance.now();
-    const result = solve(itemIds, tabletIds);
+    state.results = solve(itemIds, tabletIds);
     const ms = Math.round(performance.now() - t0);
     state.solving = false;
+    state.resultIdx = 0;
     $('#solveBtn').disabled = false;
     $('#solveBtn').textContent = '求解最优摆放';
-    const placed = result.placements;
-    renderBoard(placed);
-    const placedItems = placed.filter(p => p.kind === 'item');
-    const placedTablets = placed.filter(p => p.kind === 'tablet');
-    const totalVal = placedItems.reduce((s, p) => s + itemValue(byId(p.id)) * effLevel(result.board, p.r, p.c), 0);
-    $('#resultMeta').innerHTML =
-      `总评分 <b>${Math.round(totalVal)}</b> · 放置 ${placedItems.length} 物品 + ${placedTablets.length} 石板 · 求解耗时 ${ms}ms` +
-      `<div class="board-summary">` +
-      placedItems.map(p => {
-        const a = byId(p.id); const lv = effLevel(result.board, p.r, p.c);
-        return `<span class="chip r-${a.rarity} ${lv <= 0 ? 'off' : ''}" title="${esc(a.effect)}">${esc(a.nameZh || a.name)} Lv${lv}</span>`;
-      }).join('') + `</div>`;
+    renderResult(ms);
   }, 30);
 }
 
-// ---------------- 分享: URL hash ---------------- //
+function renderResult(ms) {
+  const result = state.results[state.resultIdx] || state.results[0];
+  const placed = result.placements;
+  renderBoard(placed);
+  const placedItems = placed.filter(p => p.kind === 'item');
+  const placedTablets = placed.filter(p => p.kind === 'tablet');
+  const totalVal = placedItems.reduce((s, p) => {
+    const a = byId(p.id);
+    return s + itemValue(a) * effLevel(result.board, p.r, p.c, a);
+  }, 0);
+  const nav = state.results.length > 1
+    ? `<div class="plan-nav">方案: ${state.results.map((_, i) => `<button class="plan-btn ${i === state.resultIdx ? 'on' : ''}" data-idx="${i}">${i + 1}</button>`).join('')}</div>`
+    : '';
+  $('#resultMeta').innerHTML =
+    `${nav}<div>总评分 <b>${Math.round(totalVal)}</b> · 放置 ${placedItems.length} 物品 + ${placedTablets.length} 石板 · 求解耗时 ${ms}ms</div>` +
+    `<div class="board-summary">` +
+    placedItems.map(p => {
+      const a = byId(p.id); const lv = effLevel(result.board, p.r, p.c, a);
+      return `<span class="chip r-${a.rarity} ${lv <= 0 ? 'off' : ''}" title="${esc(a.effect)}">${esc(a.nameZh || a.name)} Lv${lv}</span>`;
+    }).join('') + `</div>`;
+  $('#resultMeta').querySelectorAll('.plan-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.resultIdx = +btn.dataset.idx;
+      renderResult(ms);
+    });
+  });
+}
+
+// ---------------- 占用格子编辑 ---------------- //
+function renderOccupiedEditor() {
+  const wrap = $('#occupiedGrid');
+  wrap.style.gridTemplateColumns = `repeat(${state.W}, var(--ocell))`;
+  let html = '';
+  for (let r = 0; r < state.H; r++) {
+    for (let c = 0; c < state.W; c++) {
+      const key = `${r},${c}`;
+      const occ = state.occupied[key];
+      html += `<div class="oc-cell ${occ ? 'on' : ''}" data-key="${key}" title="点击切换占用">${occ ? '✕' : ''}</div>`;
+    }
+  }
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.oc-cell').forEach(el => {
+    el.addEventListener('click', () => {
+      const key = el.dataset.key;
+      if (state.occupied[key]) delete state.occupied[key];
+      else state.occupied[key] = true;
+      renderOccupiedEditor();
+      scheduleSave();
+    });
+  });
+}
+
+// ---------------- 自定义物品 ---------------- //
+function openCustomItemModal() {
+  $('#ciModal').style.display = 'flex';
+  $('#ciName').focus();
+}
+function closeCustomItemModal() { $('#ciModal').style.display = 'none'; }
+function saveCustomItem() {
+  const name = $('#ciName').value.trim();
+  const rarity = $('#ciRarity').value;
+  const value = Math.max(1, Math.min(100, +$('#ciValue').value || 10));
+  const maxLevel = Math.max(1, Math.min(15, +$('#ciMaxLevel').value || 5));
+  const effect = $('#ciEffect').value.trim() || '玩家自定义神器';
+  const tags = ALL_TAGS.filter(t => document.querySelector(`#ciTags input[value="${t}"]`)?.checked);
+  if (!name) { alert('请输入名称'); return; }
+  if (!tags.length) { alert('至少选择一个效果标签'); return; }
+  state.customItems.push({ id: 'c_' + Date.now().toString(36), name, nameZh: name, rarity, tags, value, effect, maxLevel, src: 'custom' });
+  closeCustomItemModal();
+  $('#ciName').value = ''; $('#ciValue').value = '30'; $('#ciMaxLevel').value = '5'; $('#ciEffect').value = '';
+  renderItemList();
+  scheduleSave();
+}
+
+// ---------------- 存档 (localStorage) ---------------- //
+function snapshot() {
+  return {
+    v: 2, W: state.W, H: state.H, build: state.build, weapon: state.weapon,
+    owned: { ...state.owned }, tablets: { ...state.tablets },
+    customCells: JSON.parse(JSON.stringify(state.customCells)),
+    occupied: { ...state.occupied },
+    customItems: JSON.parse(JSON.stringify(state.customItems)),
+    maxLevels: { ...state.maxLevels },
+  };
+}
+
+function restore(snap) {
+  if (!snap) return;
+  state.W = snap.W || 6; state.H = snap.H || 4;
+  state.build = snap.build || 'physical';
+  state.weapon = snap.weapon || 'none';
+  state.owned = { ...(snap.owned || {}) };
+  state.tablets = { ...(snap.tablets || {}) };
+  state.customCells = JSON.parse(JSON.stringify(snap.customCells || {}));
+  state.occupied = { ...(snap.occupied || {}) };
+  state.customItems = JSON.parse(JSON.stringify(snap.customItems || []));
+  state.maxLevels = { ...(snap.maxLevels || {}) };
+  $('#gridW').value = state.W; $('#gridH').value = state.H;
+  $('#buildSelect').value = state.build;
+  $('#weaponSelect').value = state.weapon;
+  renderItemList(); renderTabletList(); updateCounts(); renderOccupiedEditor();
+}
+
+let saves = { current: '默认存档', list: {} };
+function loadSaves() {
+  try { saves = JSON.parse(localStorage.getItem(STORE_KEY)) || { current: '默认存档', list: {} }; }
+  catch (e) { saves = { current: '默认存档', list: {} }; }
+  if (!saves.list) saves.list = {};
+  if (!saves.current || !saves.list[saves.current]) { saves.current = '默认存档'; saves.list['默认存档'] = snapshot(); }
+}
+let saveTimer = null;
+function clearSaveTimer() { clearTimeout(saveTimer); saveTimer = null; }
+function scheduleSave() {
+  clearSaveTimer();
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    saves.list[saves.current] = snapshot();
+    localStorage.setItem(STORE_KEY, JSON.stringify(saves));
+    renderSaveUI();
+  }, 400);
+}
+function saveNow() {
+  clearSaveTimer();
+  saves.list[saves.current] = snapshot();
+  localStorage.setItem(STORE_KEY, JSON.stringify(saves));
+  renderSaveUI();
+}
+function switchSave(name) {
+  clearSaveTimer();
+  saves.list[saves.current] = snapshot();
+  saves.current = name;
+  restore(saves.list[name]);
+  saveNow();
+}
+function deleteSave(name) {
+  if (!confirm(`删除存档「${name}」?`)) return;
+  delete saves.list[name];
+  if (saves.current === name) { saves.current = '默认存档'; saves.list['默认存档'] = snapshot(); }
+  localStorage.setItem(STORE_KEY, JSON.stringify(saves));
+  renderSaveUI();
+}
+function renderSaveUI() {
+  const sel = $('#saveSelect');
+  const opts = Object.keys(saves.list).map(n => `<option value="${esc(n)}" ${n === saves.current ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.innerHTML = opts || '<option value="">(无)</option>';
+  $('#saveNameInput').value = saves.current;
+}
+
+// ---------------- 分享: URL hash / 导入导出 ---------------- //
 function exportState() {
-  const items = Object.keys(state.owned).filter(k => state.owned[k]);
-  const tablets = Object.keys(state.tablets).filter(k => state.tablets[k]);
-  const custom = {};
-  for (const [id, cells] of Object.entries(state.customCells)) if (cells) custom[id] = cells;
-  return { v: 1, W: state.W, H: state.H, build: state.build, items, tablets, custom };
+  return snapshot();
 }
 
 function toShareURL() {
-  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(exportState()))));
+  const d = exportState();
+  delete d.v;
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(d))));
   return location.origin + location.pathname + '#s=' + b64;
 }
 
@@ -383,16 +587,32 @@ function importFromURL() {
   if (!m) return;
   try {
     const d = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
-    if (!d || d.v !== 1) return;
-    state.W = d.W || 6; state.H = d.H || 4;
-    state.build = d.build || 'physical';
-    state.owned = {}; (d.items || []).forEach(id => { if (byId(id)) state.owned[id] = true; });
-    state.tablets = {}; (d.tablets || []).forEach(id => { if (byTabletId(id)) state.tablets[id] = true; });
-    state.customCells = d.custom || {};
-    $('#gridW').value = state.W; $('#gridH').value = state.H;
-    $('#buildSelect').value = state.build;
-    renderItemList(); renderTabletList(); updateCounts();
+    if (!d) return;
+    restore(d);
   } catch (e) { console.warn('bad share url', e); }
+}
+
+function exportFile() {
+  const blob = new Blob([JSON.stringify({ ...exportState(), v: 2 }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `sephiria-build-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const d = JSON.parse(reader.result);
+      if (!d || !d.owned) throw new Error('bad file');
+      restore(d);
+      saveNow();
+      alert('导入成功');
+    } catch (e) { alert('文件格式不对: ' + e.message); }
+  };
+  reader.readAsText(file);
 }
 
 // ---------------- 自定义石板编辑器 ---------------- //
@@ -418,14 +638,14 @@ function openTabletEditor(id) {
         const v = +($('#teValue')?.value || 1);
         const i = cells.findIndex(cl => cl.dx === c && cl.dy === r);
         if (i >= 0 && cells[i].lv === v) {
-          cells.splice(i, 1); // 同值再点 -> 删除
+          cells.splice(i, 1);
         } else if (i >= 0) {
-          cells[i].lv = v;    // 已有 -> 改成当前数值
+          cells[i].lv = v;
         } else if (v !== 0) {
           cells.push({ dx: c, dy: r, lv: v });
         }
         state.customCells[id] = cells.length ? cells.slice() : null;
-        openTabletEditor(id); renderTabletList();
+        openTabletEditor(id); renderTabletList(); scheduleSave();
       });
       grid.appendChild(el);
     }
@@ -449,15 +669,22 @@ function bindTabletEditorControls() {
   $('#tabletEditorClear').addEventListener('click', () => {
     if (!editingTablet) return;
     state.customCells[editingTablet] = null;
-    openTabletEditor(editingTablet); renderTabletList();
+    openTabletEditor(editingTablet); renderTabletList(); scheduleSave();
   });
 }
 
 // ---------------- 初始化 ---------------- //
 function init() {
-  $('#gridW').addEventListener('change', e => { state.W = Math.min(12, Math.max(3, +e.target.value || 6)); $('#gridW').value = state.W; });
-  $('#gridH').addEventListener('change', e => { state.H = Math.min(10, Math.max(2, +e.target.value || 4)); $('#gridH').value = state.H; });
-  $('#buildSelect').addEventListener('change', e => { state.build = e.target.value; renderItemList(); });
+  $('#gridW').addEventListener('change', e => {
+    state.W = Math.min(12, Math.max(3, +e.target.value || 6));
+    $('#gridW').value = state.W; renderOccupiedEditor(); scheduleSave();
+  });
+  $('#gridH').addEventListener('change', e => {
+    state.H = Math.min(10, Math.max(2, +e.target.value || 4));
+    $('#gridH').value = state.H; renderOccupiedEditor(); scheduleSave();
+  });
+  $('#buildSelect').addEventListener('change', e => { state.build = e.target.value; renderItemList(); scheduleSave(); });
+  $('#weaponSelect').addEventListener('change', e => { state.weapon = e.target.value; renderItemList(); scheduleSave(); });
   $('#search').addEventListener('input', renderItemList);
   $('#rarityFilter').addEventListener('change', renderItemList);
   $('#solveBtn').addEventListener('click', runSolve);
@@ -469,10 +696,30 @@ function init() {
     }).catch(() => prompt('复制这个链接分享给其他玩家:', url));
   });
   $('#clearBtn').addEventListener('click', () => {
-    if (!confirm('清空所有勾选?')) return;
+    if (!confirm(`清空所有勾选?\n(当前存档「${saves.current}」会被覆盖为空白状态)`)) return;
     state.owned = {}; state.tablets = {}; state.customCells = {};
-    renderItemList(); renderTabletList(); updateCounts();
+    renderItemList(); renderTabletList(); updateCounts(); scheduleSave();
   });
+  $('#addItemBtn').addEventListener('click', openCustomItemModal);
+  $('#ciClose').addEventListener('click', closeCustomItemModal);
+  $('#ciSave').addEventListener('click', saveCustomItem);
+  $('#ciTags').innerHTML = ALL_TAGS.map(t => `<label><input type="checkbox" value="${t}">${TAG_NAMES[t]}</label>`).join('');
+  $('#exportBtn').addEventListener('click', exportFile);
+  $('#importBtn').addEventListener('click', () => $('#importFile').click());
+  $('#importFile').addEventListener('change', e => {
+    if (e.target.files[0]) importFile(e.target.files[0]);
+    e.target.value = '';
+  });
+  $('#saveNowBtn').addEventListener('click', () => {
+    const name = $('#saveNameInput').value.trim() || '默认存档';
+    clearSaveTimer();
+    saves.list[name] = snapshot();
+    saves.current = name;
+    localStorage.setItem(STORE_KEY, JSON.stringify(saves));
+    renderSaveUI();
+  });
+  $('#saveDeleteBtn').addEventListener('click', () => deleteSave(saves.current));
+  $('#saveSelect').addEventListener('change', e => { if (e.target.value) switchSave(e.target.value); });
   $('#loadPresetBtn').addEventListener('click', () => {
     const sel = $('#presetSelect').value;
     const p = TABLET_PRESETS.find(x => x.id === sel);
@@ -482,13 +729,12 @@ function init() {
     const t = TABLETS.find(x => x.id === names || x.name === names || x.nameZh === names);
     if (!t) { alert('没找到这个石板'); return; }
     state.customCells[t.id] = p.cells.map(cl => ({ ...cl }));
-    renderTabletList();
+    renderTabletList(); scheduleSave();
   });
   $('#tabletList').addEventListener('click', e => {
     const row = e.target.closest('.tablet-row');
     if (row && e.target.tagName !== 'INPUT' && !e.target.closest('.edit-btn')) {
       const inp = row.querySelector('input');
-      // 打开编辑器 = 要用这个石板, 自动勾选
       state.tablets[inp.dataset.id] = true;
       inp.checked = true;
       renderTabletList();
@@ -499,11 +745,14 @@ function init() {
   bindTabletEditorControls();
   bindDetail();
 
-  // 预设选择器填充
   $('#presetSelect').innerHTML = TABLET_PRESETS.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  $('#buildSelect').innerHTML = Object.entries(BUILD_PRESETS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
+  $('#weaponSelect').innerHTML = Object.entries(WEAPONS).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
 
-  importFromURL();
-  renderItemList(); renderTabletList(); updateCounts();
+  loadSaves();
+  restore(saves.list[saves.current]);
+  importFromURL(); // 最后应用 URL 状态 (若存在则覆盖存档)
+  renderSaveUI();
 }
 
 document.addEventListener('DOMContentLoaded', init);

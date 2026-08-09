@@ -3,7 +3,7 @@
 // 数据来源:
 //  A) sephiria.miraheze.org (46 个神器, infobox 结构化, 2024-2026)
 //  B) NGA 玩家数据测算帖 tid=44470360 (中文名/效果/稀有度)
-//  C) konachangame.com 图鉴截图 OCR 识别 (石板效果 2026-08)
+//  C) konachangame.com 简易图鉴 (石板名/稀有度)
 // 数值(value)为按效果文本的相对估算, 非官方公式, 供优化排序用。
 // 玩家可在 UI 中修改/添加物品, 并导出/导入 JSON 分享。
 // ============================================================
@@ -265,6 +265,38 @@ const TABLET_PRESETS = [
   { id: 'p_minus_ring', name: '示例: 斜角 -1 (负面)', cells: [{ dx: 1, dy: 1, lv: -1 }, { dx: -1, dy: 1, lv: -1 }, { dx: 1, dy: -1, lv: -1 }, { dx: -1, dy: -1, lv: -1 }] },
 ];
 
+// ---------- 套装定义 ----------
+// 每个物品的 set 字段对应下面的套装; 同套装 ≥2 件时, 每件价值加成 (count-1)*0.15 (封顶 60%)
+// 来源: NGA 玩家测算帖 (套装归属可能随版本变动, 可在 data.js 修正)
+const SETS = {
+  sturdy:   { name: '坚固',  ids: ['warrior_proof', 'stair_model', 'silver_bangle', 'thorn_amulet', 'black_scale', 'colorless_cube'] },
+  windsong: { name: '风之歌', ids: ['score_wind', 'windgrass_scarf'] },
+  precision:{ name: '精密',  ids: ['balt_precision_glasses', 'longing_amulet', 'evil_bandage', 'warm_stone'] },
+  mystic:   { name: '神秘',  ids: ['snow_white_cloak', 'withered_flower', 'star_ruby', 'obras_blood', 'blue_pearl', 'broken_root', 'white_branch'] },
+  shadow:   { name: '暗影',  ids: ['specimen_beak'] },
+  storm:    { name: '雷云',  ids: ['fretted_clay_tablet', 'lightning_stone', 'stone_flower', 'cloud_seed_arrowhead', 'leaf_bird_leather', 'mini_ballista', 'chalcedony_key', 'sapote_fruit'] },
+};
+// 物品 -> 套装id 映射 (由 SETS 生成)
+const SET_OF = {};
+for (const [sid, s] of Object.entries(SETS)) for (const id of s.ids) SET_OF[id] = sid;
+
+// ---------- 武器联动权重 ----------
+// 选择武器后, 与流派权重叠加: 有效权重 = 流派权重 × 武器权重
+const WEAPONS = {
+  none:        { label: '无/通用', tags: { atk: 1, spd: 1, crit: 1, cdmg: 1, trig: 1, elem: 1, surv: 1, mp: 1, eco: 1, util: 1 } },
+  greatsword:  { label: '大剑(平A)', tags: { atk: 1.5, spd: 1.3, crit: 1.2, cdmg: 1.2, util: 1.1, trig: 0.8, elem: 0.5, surv: 0.8, mp: 0.6, eco: 0.7 } },
+  bone_sword:  { label: '骨剑(位移BUFF)', tags: { util: 1.6, spd: 1.5, atk: 1.3, surv: 1.2, trig: 0.8, elem: 0.5, crit: 1.0, cdmg: 1.0, mp: 0.7, eco: 0.7 } },
+  spiral:      { label: '螺旋剑(触发)', tags: { trig: 1.7, atk: 1.3, elem: 1.1, spd: 1.1, crit: 1.0, cdmg: 1.0, surv: 0.7, mp: 0.8, eco: 0.6, util: 0.8 } },
+  finisher:    { label: '尾刀大剑(爆伤)', tags: { cdmg: 1.7, crit: 1.5, atk: 1.4, trig: 0.8, elem: 0.5, spd: 1.0, surv: 0.7, mp: 0.6, eco: 0.7, util: 0.9 } },
+  staff:       { label: '法杖(魔法)', tags: { elem: 1.7, mp: 1.3, trig: 1.1, atk: 0.5, spd: 0.8, crit: 0.9, cdmg: 0.9, surv: 0.6, eco: 0.6, util: 0.7 } },
+  crossbow:    { label: '弩(攻速)', tags: { spd: 1.6, trig: 1.3, atk: 1.2, crit: 1.1, cdmg: 1.1, elem: 0.9, surv: 0.6, mp: 0.6, eco: 0.7, util: 0.9 } },
+};
+
+// 等级上限 (按稀有度默认, 可在 UI/自定义物品中修改)
+function defaultMaxLevel(rarity) {
+  return { common: 3, advanced: 5, rare: 7, legendary: 9 }[rarity] || 5;
+}
+
 // 流派预设: tag -> 权重倍率 (调整后价值 = value × avg(权重[tags]))
 const BUILD_PRESETS = {
   physical: { label: '物理平A', tags: { atk: 1.5, spd: 1.4, crit: 1.2, cdmg: 1.3, trig: 0.8, elem: 0.5, surv: 0.7, mp: 0.5, eco: 0.8, util: 1.0 } },
@@ -275,4 +307,4 @@ const BUILD_PRESETS = {
   custom:   { label: '自定义',  tags: { atk: 1, spd: 1, crit: 1, cdmg: 1, trig: 1, elem: 1, surv: 1, mp: 1, eco: 1, util: 1 } },
 };
 
-if (typeof module !== 'undefined') module.exports = { ARTIFACTS, TABLETS, TABLET_PRESETS, BUILD_PRESETS, RARITY_LABEL };
+if (typeof module !== 'undefined') module.exports = { ARTIFACTS, TABLETS, TABLET_PRESETS, BUILD_PRESETS, RARITY_LABEL, SETS, SET_OF, WEAPONS, defaultMaxLevel };

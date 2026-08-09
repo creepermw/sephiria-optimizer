@@ -22,9 +22,17 @@
       <label>宽 <input type="number" id="gridW" value="6" min="3" max="12"></label>
       <label>高 <input type="number" id="gridH" value="4" min="2" max="10"></label>
     </div>
-    <label>流派
-      <select id="buildSelect"></select>
-    </label>
+    <div class="grid-row">
+      <label style="flex:1">流派
+        <select id="buildSelect"></select>
+      </label>
+    </div>
+    <div class="grid-row">
+      <label style="flex:1">武器
+        <select id="weaponSelect"></select>
+      </label>
+    </div>
+    <p class="hint">武器×流派权重叠加影响神器价值; 同套装神器 ≥2 件时每件价值 +15%/件(最多 +60%)。</p>
 
     <h2>② 你拥有的神器 <span id="itemCount" class="count">0</span></h2>
     <div class="filters">
@@ -38,6 +46,7 @@
       </select>
     </div>
     <div id="itemList" class="list"></div>
+    <button id="addItemBtn" class="wide-btn">＋ 添加自定义神器</button>
 
     <h2>③ 你拥有的石板 <span id="tabletCount" class="count">0</span></h2>
     <p class="hint">勾选石板自动弹出效果编辑器; 内置效果数据来自图鉴截图识别, 可✏️修正。</p>
@@ -46,11 +55,28 @@
       <select id="presetSelect"></select>
       <button id="loadPresetBtn" title="把示例效果应用到某个石板">套用示例</button>
     </div>
+
+    <h2>④ 已占用格子</h2>
+    <p class="hint">背包里被药水/任务物品占用的格子, 点击标记, 求解时自动避开。</p>
+    <div id="occupiedGrid" class="oc-grid"></div>
+
+    <h2>⑤ 存档</h2>
+    <div class="save-row">
+      <input type="text" id="saveNameInput" placeholder="存档名" maxlength="20">
+      <button id="saveNowBtn">保存</button>
+      <button id="saveDeleteBtn">删除</button>
+    </div>
+    <select id="saveSelect"></select>
+    <div class="save-row">
+      <button id="exportBtn">导出 JSON</button>
+      <button id="importBtn">导入 JSON</button>
+      <input type="file" id="importFile" accept=".json" style="display:none">
+    </div>
   </section>
 
   <!-- 中: 结果 -->
   <section class="panel result-panel">
-    <h2>④ 最优摆放</h2>
+    <h2>⑥ 最优摆放</h2>
     <div class="actions">
       <button id="solveBtn" class="primary">求解最优摆放</button>
       <button id="shareBtn">复制分享链接</button>
@@ -58,10 +84,10 @@
     </div>
     <div id="resultMeta" class="result-meta"></div>
     <div id="board" class="board"></div>
-    <p class="hint">格子含义: 物品显示 <b>生效等级×价值</b>; 石板显示其指向的格子坐标。<br>
-    等级 ≤0 的物品失效(灰色)。</p>
+    <p class="hint">格子含义: 物品显示 <b>生效等级/上限 × 价值</b>; 石板显示其指向的格子坐标。<br>
+    等级 ≤0 的物品失效(灰色); 灰色 ✕ 为占用格。</p>
 
-    <h2>⑤ 物品详情 <span class="count">点击左侧物品/石板查看</span></h2>
+    <h2>⑦ 物品详情 <span class="count">点击左侧物品/石板查看</span></h2>
     <div id="detailPanel" class="detail-panel">
       <p class="hint">点击左侧列表中的物品或石板, 这里会显示完整效果与数值。</p>
     </div>
@@ -96,10 +122,36 @@
   </div>
 </div>
 
+<!-- 自定义神器录入 -->
+<div id="ciModal" class="modal" style="display:none">
+  <div class="modal-box">
+    <h3>添加自定义神器</h3>
+    <div class="ci-form">
+      <label>名称 <input type="text" id="ciName" placeholder="如: 帕拉斯的卡牌"></label>
+      <label>稀有度
+        <select id="ciRarity">
+          <option value="common">白</option>
+          <option value="advanced" selected>蓝</option>
+          <option value="rare">金</option>
+          <option value="legendary">红</option>
+        </select>
+      </label>
+      <label>基础价值 <input type="number" id="ciValue" value="30" min="1" max="100"></label>
+      <label>等级上限 <input type="number" id="ciMaxLevel" value="5" min="1" max="15"></label>
+      <label>效果标签 <span id="ciTags" class="ci-tags"></span></label>
+      <label>效果描述 <textarea id="ciEffect" rows="2" placeholder="效果文本…"></textarea></label>
+    </div>
+    <div class="actions">
+      <button id="ciClose">取消</button>
+      <button id="ciSave" class="primary">添加</button>
+    </div>
+  </div>
+</div>
+
 <script src="data.js"></script>
 <script>
   if (typeof module === 'undefined') {
-    window.SEPHIRIA_DATA = { ARTIFACTS, TABLETS, TABLET_PRESETS, BUILD_PRESETS, RARITY_LABEL };
+    window.SEPHIRIA_DATA = { ARTIFACTS, TABLETS, TABLET_PRESETS, BUILD_PRESETS, RARITY_LABEL, SETS, SET_OF, WEAPONS, defaultMaxLevel };
   }
 </script>
 <script src="app.js"></script>
